@@ -72,6 +72,28 @@ UINT __cdecl HttpWorkerThreadProc(LPVOID /*pArg*/)
 	// gives plenty of headroom while keeping the per-thread buffer to ~8MB.
 	const int TMP_SIZE = 200000;
 
+	// Pacing: read HistoryDelayMs once at worker start (registry override, 0-5000).
+	{
+		HKEY hKey = NULL;
+		if (RegOpenKeyEx(HKEY_CURRENT_USER,
+			_T("Software\\OpenAlgo\\OpenAlgo\\OpenAlgo"), 0,
+			KEY_READ, &hKey) == ERROR_SUCCESS)
+		{
+			DWORD val = 0, type = 0, size = sizeof(DWORD);
+			if (RegQueryValueEx(hKey, _T("HistoryDelayMs"), NULL, &type,
+				(LPBYTE)&val, &size) == ERROR_SUCCESS && type == REG_DWORD)
+			{
+				if (val > 5000) val = 5000;
+				g_nHistoryDelayMs = (int)val;
+			}
+			RegCloseKey(hKey);
+		}
+		CString paceMsg;
+		paceMsg.Format(_T("OpenAlgo: HttpWorker history pacing = %d ms between calls"),
+			g_nHistoryDelayMs);
+		OutputDebugString(paceMsg);
+	}
+
 	while (InterlockedCompareExchange(&g_bHttpWorkerShouldStop, 0, 0) == 0)
 	{
 		// Wait for work, with a periodic poll for the stop flag
@@ -160,6 +182,11 @@ UINT __cdecl HttpWorkerThreadProc(LPVOID /*pArg*/)
 				nResult, (item.nPeriodicity == 60) ? _T("1m") : _T("daily"),
 				(LPCTSTR)item.ticker);
 			OutputDebugString(log);
+
+			// Pace history calls: stay under the broker's sustained per-minute
+			// budget (e.g. Fyers 200/min) so bulk backfills don't trip 429s.
+			if (g_nHistoryDelayMs > 0)
+				Sleep(g_nHistoryDelayMs);
 
 			if (nResult > 0)
 			{

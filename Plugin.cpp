@@ -58,6 +58,12 @@ int g_nBackfillDays = 0;        // Number of days to backfill (0 = use default l
 int g_nBackfillPeriodicity = 0; // 60 for 1-minute, 86400 for daily
 BOOL g_bBackfillRequested = FALSE;
 
+// History pacing: sleep between queued history HTTP calls so sequential
+// backfills stay under the broker's sustained per-minute budget even when
+// OpenAlgo's per-second limiter would otherwise let bursts through and
+// surface 429s. Configurable via registry HistoryDelayMs (0-5000).
+volatile int g_nHistoryDelayMs = 400;
+
 // Local static variables
 static int g_nRetryCount = RETRY_COUNT;
 static struct RecentInfo* g_aInfos = NULL;

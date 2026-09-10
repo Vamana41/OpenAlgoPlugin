@@ -27,6 +27,7 @@ extern int g_nStatus;
 
 // Backfill request tracking
 extern int g_nBackfillDays;
+extern volatile int g_nHistoryDelayMs;
 extern int g_nBackfillPeriodicity;
 extern BOOL g_bBackfillRequested;
 

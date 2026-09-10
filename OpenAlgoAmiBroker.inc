@@ -1,6 +1,9 @@
 ///////////////////////////////////////////////////////////
 // Exported Functions
 ///////////////////////////////////////////////////////////
+// Forward declaration: defined later in this file (chart-symbol check used
+// by the auto-subscribe guard in GetQuotesEx).
+BOOL IsActiveChartSymbol(const CString& ticker);
 PLUGINAPI int GetPluginInfo(struct PluginInfo* pInfo)
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
@@ -995,8 +998,47 @@ PLUGINAPI int GetQuotesEx(LPCTSTR pszTicker, int nPeriodicity, int nLastValid, i
 	EnterCriticalSection(&g_WebSocketCriticalSection);
 	if (!g_SubscribedSymbols.Lookup(ticker, bSubscribed))
 	{
-		if (g_bWebSocketConnected && SubscribeToSymbol(pszTicker))
+		// Guard: bulk quote requests (e.g. Analysis scans over thousands of
+		// symbols) used to auto-subscribe everything, saturating the OpenAlgo
+		// proxy/broker feed (Fyers caps at 3 connections x 1000 symbols) and
+		// killing live data for real chart symbols. Cap auto-subscriptions;
+		// the active chart symbol is always allowed.
+		static int s_nMaxWSSubscriptions = -1;
+		if (s_nMaxWSSubscriptions < 0)
+		{
+			s_nMaxWSSubscriptions = 64;
+			HKEY hKey = NULL;
+			if (RegOpenKeyEx(HKEY_CURRENT_USER,
+				_T("Software\\OpenAlgo\\OpenAlgo\\OpenAlgo"), 0,
+				KEY_READ, &hKey) == ERROR_SUCCESS)
+			{
+				DWORD val = 0, type = 0, size = sizeof(DWORD);
+				if (RegQueryValueEx(hKey, _T("MaxWSSubscriptions"), NULL, &type,
+					(LPBYTE)&val, &size) == ERROR_SUCCESS && type == REG_DWORD
+					&& val > 0 && val <= 3000)
+				{
+					s_nMaxWSSubscriptions = (int)val;
+				}
+				RegCloseKey(hKey);
+			}
+			CString capMsg;
+			capMsg.Format(_T("OpenAlgo: MaxWSSubscriptions = %d"), s_nMaxWSSubscriptions);
+			OutputDebugString(capMsg);
+		}
+		BOOL bIsChart = IsActiveChartSymbol(ticker);
+		if ((int)g_SubscribedSymbols.GetCount() >= s_nMaxWSSubscriptions && !bIsChart)
+		{
+			static BOOL s_bCapLogged = FALSE;
+			if (!s_bCapLogged)
+			{
+				OutputDebugString(_T("OpenAlgo: auto-subscribe cap reached - skipping WS subscribe for non-chart symbols (bulk request?)"));
+				s_bCapLogged = TRUE;
+			}
+		}
+		else if (g_bWebSocketConnected && SubscribeToSymbol(pszTicker))
+		{
 			g_SubscribedSymbols.SetAt(ticker, TRUE);
+		}
 	}
 	LeaveCriticalSection(&g_WebSocketCriticalSection);
 

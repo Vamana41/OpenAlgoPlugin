@@ -1026,12 +1026,25 @@ PLUGINAPI int GetQuotesEx(LPCTSTR pszTicker, int nPeriodicity, int nLastValid, i
 			OutputDebugString(capMsg);
 		}
 		BOOL bIsChart = IsActiveChartSymbol(ticker);
-		if ((int)g_SubscribedSymbols.GetCount() >= s_nMaxWSSubscriptions && !bIsChart)
+		if (!bIsChart)
+		{
+			// Scan-safe mode: bulk quote requests (scans over thousands of
+			// symbols) never consume streaming slots. Non-chart symbols get
+			// live updates only via the RT Quote Window path (GetRecentInfo),
+			// which is user-driven and cap-exempt.
+			static BOOL s_bScanSafeLogged = FALSE;
+			if (!s_bScanSafeLogged)
+			{
+				OutputDebugString(_T("OpenAlgo: scan-safe mode - non-chart symbols do not auto-subscribe to WS"));
+				s_bScanSafeLogged = TRUE;
+			}
+		}
+		else if ((int)g_SubscribedSymbols.GetCount() >= s_nMaxWSSubscriptions)
 		{
 			static BOOL s_bCapLogged = FALSE;
 			if (!s_bCapLogged)
 			{
-				OutputDebugString(_T("OpenAlgo: auto-subscribe cap reached - skipping WS subscribe for non-chart symbols (bulk request?)"));
+				OutputDebugString(_T("OpenAlgo: MaxWSSubscriptions cap reached - chart symbol not auto-subscribed"));
 				s_bCapLogged = TRUE;
 			}
 		}
